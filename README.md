@@ -1,4 +1,5 @@
 # ADO-PoshDevSecOPSTemplatePipeline
+
 Azure Pipelines extends template for the CI of PowerShell repositories: security analysis with the [Initialize-ASTRule rules](https://github.com/MS-LUF/Initialize-ASTRuleGenerator), coding-practice analysis with PSScriptAnalyzer, the repository's Pester tests, its SBOM, and a check of its components for known vulnerabilities, and packs and publishes its PowerShell module as a NuGet package.
 
 (c) 2021-2026 lucas-cueff.com Distributed under Artistic Licence 2.0 (https://opensource.org/licenses/artistic-license-2.0).
@@ -21,7 +22,7 @@ Stage B (B1 and B2) runs on every build, the base branch included, next to stage
 
 - **Changed files** are those between the tested commit and its merge-base with the base branch (the target branch for a pull request), so every commit of a branch is covered.
 - **The scripts, rules and tools run from this repository**, never from the repository under test: a branch cannot change its own scanner, rules or allow-list.
-- **Tools** are bundled under `internal-ci/Security-PWSH-ADO-ci/`: PSScriptAnalyzer 1.25.0, Pester 6.2.0 and the Initialize-ASTRuleGenerator module 0.12.0 with its rules, and Microsoft.PowerShell.PSResourceGet 1.1.0 packs the package (C1). Nothing is downloaded while they are present; a missing PSScriptAnalyzer or Pester is taken from the agent, then from PSGallery.
+- **Tools** are bundled under `internal-ci/Security-PWSH-ADO-ci/`: PSScriptAnalyzer 1.25.0, Pester 6.2.0 and the Initialize-ASTRuleGenerator module 1.1.1 with its rules, and Microsoft.PowerShell.PSResourceGet 1.1.0 packs the package (C1). Nothing is downloaded while they are present; a missing PSScriptAnalyzer or Pester is taken from the agent, then from PSGallery.
 - **Shared code**: the job scripts dot-source `pwsh-ci-common.ps1` (logging, the changed files, the tool import, the annotations).
 - **Logs**: each job writes `Logs/*.log`; a failed job publishes them as a build artifact, and A3 publishes `Logs/pester-testresults.xml` as test results.
 - **Annotations**: each A1/A2 finding (error or warning, by severity) and each failed test, block or test file of A3 also shows in the build summary, at its file and line.
@@ -36,13 +37,13 @@ trigger:
 
 resources:
   repositories:
-  - repository: TemplatePipeline # the alias the template checks out: change the name if necessary
+  - repository: TemplatePipeline # the alias the template checks out: keep it
     type: git
     name: LABIA/TemplatePipeline
-    ref: refs/tags/v1.6.3 # a release tag; move it to take a newer release
+    ref: refs/tags/v1.7.0 # a release tag; move it to take a newer release
 
 extends:
-  template: pwsh-ci.yml@TemplatePipeline #adapt to the template repo name
+  template: pwsh-ci.yml@TemplatePipeline
   parameters:
     baseBranch: main  # default
     testPath: Tests   # default
@@ -59,6 +60,20 @@ extends:
     publishServiceConnection: '' # default; a NuGet service connection (not an API key) for a feed outside the organization
 ```
 
+## Tests
+The job scripts have an integration test suite in [`Tests/`](Tests/tests.md) (Pester 6): each
+script is executed the way the pipeline runs it, against scratch git repositories under the
+temporary folder, with assertions on exit codes, annotations and artifacts (SBOM, reports,
+`.nupkg`). Nothing is written into the working tree.
+
+```powershell
+Import-Module ./internal-ci/Security-PWSH-ADO-ci/Pester   # the bundled Pester
+Invoke-Pester ./Tests -ExcludeTagFilter Network           # as CI would run it
+```
+
+The `Network` tag (B2 downloads Grype and its database) and `WindowsPowerShell` (smoke cases
+under 5.1) self-skip where their prerequisites are missing. See
+[Tests/tests.md](Tests/tests.md) for the coverage, the layout and what is not tested.
 ## Publish the SBOM to Dependency-Track
 Job B3 sends the SBOM of each base-branch build to a [Dependency-Track](https://dependencytrack.org/) server (5.x, or 4.11.4 or later): one project per repository, named after the repository (or `dependencyTrackProjectName`), at the version named after the base branch (for example `main`), marked as the latest. Each upload replaces that version's components. The project is created on the first upload, tagged with the Azure DevOps project. B3 waits until Dependency-Track has processed the SBOM, and fails the build on any error.
 
@@ -132,7 +147,7 @@ Each agent of the pool needs:
 - The first run asks to authorise the pipeline to read this repository.
 - **`ciToolsRoot` is not a setting:** it is where the template's scripts sit in its checkout, and it accepts only its default. Leave it out of your pipeline. A copy of the template hosted in a subfolder of another repository changes it (see [howto.md](howto.md), step 1), with what sharing a repository means for the template's protection and releases.
 - **Releases** are annotated tags on `main` (`v1.0.0`, ...); the tag message holds the release notes. A pipeline gets a new release, including new A1 rules, only when its `ref` moves to the new tag. A pushed tag is never moved or deleted.
-- To enforce the template, add a **Required template** check (this repository, the release tag such as `refs/tags/v1.6.3`, `pwsh-ci.yml`) to a protected resource the pipelines use, and update it with each release. Protect `main` with a branch policy, and deny **Force push** on *All tags* to everyone but the maintainers, so that a tag cannot be recreated on another commit.
+- To enforce the template, add a **Required template** check (this repository, the release tag such as `refs/tags/v1.7.0`, `pwsh-ci.yml`) to a protected resource the pipelines use, and update it with each release. Protect `main` with a branch policy, and deny **Force push** on *All tags* to everyone but the maintainers, so that a tag cannot be recreated on another commit.
 - **A3 checks quality, not security:** the tests are the branch's own code, so a branch can make them pass. Only A1 and A2 are out of its reach, and A3 runs after both.
 - **`.ps1xml` files are not analysed:** type and format files can hold code run when a module loads, but PSScriptAnalyzer cannot analyse XML. Review them by hand.
 - **The SBOM** lists the PowerShell modules the repository declares (`RequiredModules`, `NestedModules`, `#Requires -Modules`), its own modules, its `.dll` and `.exe` files with their SHA-256 (a .NET assembly under its NuGet ID), and its `packages.lock.json` packages. Nothing from the repository is run. Pin modules with `RequiredVersion`: a module without an exact version is a warning.

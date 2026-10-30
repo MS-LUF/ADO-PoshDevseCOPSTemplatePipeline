@@ -251,6 +251,19 @@ try {
         foreach ($result in @($changedFilePaths | Invoke-ScriptAnalyzer -CustomRulePath $custommodule -ErrorAction Stop)) {
             $results.Add($result)
         }
+        # A file must not be able to hide its own findings with a suppression attribute. The way
+        # to accept a false positive is the exceptions file, read from the base branch.
+        foreach ($result in @($changedFilePaths | Invoke-ScriptAnalyzer -CustomRulePath $custommodule -SuppressedOnly -ErrorAction Stop)) {
+            $results.Add([pscustomobject]@{
+                    ScriptName = $result.ScriptName
+                    ScriptPath = $result.ScriptPath
+                    Line       = $result.Line
+                    Column     = $result.Column
+                    RuleName   = $result.RuleName
+                    Severity   = "$($result.Severity)"
+                    Message    = "Suppressed in the file, still counted: $($result.Message)"
+                })
+        }
     } else {
         Write-CILog -info info -message "No changed PowerShell scripts to analyze." -Verbose
     }

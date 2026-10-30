@@ -96,7 +96,7 @@ check (step 4) names that path. Before choosing this, weigh what sharing a repos
 - everyone who can push to that repository's `main` can change the scanner, its rules and its
   allow-list, unless a path-scoped branch policy requires reviewers on `e2e/powershell/*`;
 - a tag versions the whole repository: the template's releases are tied to the other folders,
-  and a prefix such as `powershell/v1.6.3` keeps their tags apart;
+  and a prefix such as `powershell/v1.7.0` keeps their tags apart;
 - every job checks out the whole repository;
 - if that repository is itself built with this template, its scan also covers the bundled tools
   under `e2e/powershell/internal-ci/` (only a root `internal-ci/` is skipped).
@@ -183,7 +183,7 @@ resources:
   - repository: TemplatePipeline   # the alias the template checks out: keep it
     type: git
     name: LABIA/TemplatePipeline   # <project>/<repository> of step 1
-    ref: refs/tags/v1.6.3          # a release tag of step 2
+    ref: refs/tags/v1.7.0          # a release tag of step 2
 
 extends:
   template: pwsh-ci.yml@TemplatePipeline
@@ -238,6 +238,11 @@ show the reason, as long as the file keeps that hash; an edit of the file asks f
 exception. An invalid or expired entry fails A1. A file that does not parse, and the encoding
 check, cannot be excepted.
 
+Only this file accepts a finding. A `SuppressMessageAttribute` in the analysed file does not: since
+`v1.7.0`, A1 counts that finding anyway, with its severity, and logs it as
+`Suppressed in the file, still counted`. A branch with such an attribute on an A1 rule can start
+failing when its `ref` moves to that release.
+
 ### 3.4 Create and run the pipeline
 
 1. Commit and push to `main`.
@@ -282,7 +287,7 @@ needs `v1.5.0` or later.
    - **Branch control**: allowed branches `refs/heads/main`, and *Verify branch protection*
      on;
    - **Required template**: *Azure Repos*, `LABIA/TemplatePipeline`, the release tag
-     (`refs/tags/v1.6.3`), `pwsh-ci.yml`. Update its *Ref* at each release, as in step 4.
+     (`refs/tags/v1.7.0`), `pwsh-ci.yml`. Update its *Ref* at each release, as in step 4.
 5. **The pipeline** (`azure-pipelines.yml`, through a pull request):
 
    ```yaml
@@ -373,7 +378,7 @@ resource starts only if the pipeline extends the given template, at the given re
 2. *Add check > Required template*:
    - Repository type: *Azure Repos*;
    - Repository: `LABIA/TemplatePipeline`;
-   - Ref: `refs/tags/v1.6.3`;
+   - Ref: `refs/tags/v1.7.0`;
    - Path to required template: `pwsh-ci.yml`.
 3. **Test it:** push a branch whose `azure-pipelines.yml` runs a plain script instead of
    `extends`; its run must fail on the check. Then delete the branch.

@@ -48,6 +48,12 @@ function Measure-CustomASTRule {
     )
     Process
     {
+        # PSScriptAnalyzer calls the rule once per script block of a file, functions included. The
+        # outermost block already covers the nested ones, so scanning them too repeats findings.
+        if ($null -ne $ScriptBlockAst.Parent) {
+            return
+        }
+
         # A file on the allow-list is not scanned. It leaves one Warning finding instead, so that
         # skipping is visible in reports and CI logs. A script given as a string has no file and
         # is always scanned.
