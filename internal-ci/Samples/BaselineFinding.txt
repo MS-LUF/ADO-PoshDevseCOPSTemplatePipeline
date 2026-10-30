@@ -1,0 +1,12 @@
+2|Error|Downloaded code run|Downloaded content run as code (ATT&CK T1105, T1059.001) : (?i)\b(?:iex|invoke-expression)\b.*\b(?:downloadstring|downloaddata)\b
+2|Warning|Download method|Download method called (ATT&CK T1105) : DownloadString
+2|Warning|Invoke-Expression call|Code run from a string (ATT&CK T1059.001) : (?i)^\s*(?:iex|invoke-expression)\b
+3|Error|Encoded command|PowerShell started with an encoded command (ATT&CK T1027, T1059.001) : (?i)^\s*(?:&\s*)?["']?(?:powershell|pwsh)(?:\.exe)?["']?\s(?:.*\s)?-e(?:c|n|nc|nco\w*)?\s+[A-Za-z0-9+/=]{16,}
+3|Warning|Hidden or policy-bypassing PowerShell|PowerShell started hidden or bypassing the execution policy (ATT&CK T1564.003, T1059.001) : (?i)^\s*(?:&\s*)?["']?(?:powershell|pwsh)(?:\.exe)?["']?\s(?:.*\s)?-w(?:i|in|ind\w*)?\s+h
+4|Error|AMSI tampering|Reference to AMSI internals (ATT&CK T1562.001) : *AmsiUtils*
+5|Error|Defender tampering|Microsoft Defender settings weakened (ATT&CK T1562.001) : (?i)^\s*(?:Set|Add)-MpPreference\b.*\s-(?:Disable\w+|Exclusion\w+)
+6|Error|Characters picked from well-known variables|Characters taken from a well-known variable to spell a command (ATT&CK T1027.010) : (?i)^\$\{?(env:comspec|pshome|shellid|verbosepreference|env:public|env:windir)\}?$
+6|Error|Characters picked from well-known variables|Characters taken from a well-known variable to spell a command (ATT&CK T1027.010) : (?i)^\$\{?(env:comspec|pshome|shellid|verbosepreference|env:public|env:windir)\}?$
+6|Warning|Computed command name|Command name built by an expression (ATT&CK T1027.010) : ^[&.]\s*\(\s*(?:["']|\$[\w:]+\[|\$\{|\()
+7|Warning|Backtick in a command name|Command name hidden with backticks (ATT&CK T1027.010) : ^(?:[&.]\s*)?[^\s`]*`[A-Za-z0-9]
+8|Error|Recovery inhibited|Backups or shadow copies deleted (ATT&CK T1490) : (?i)^\s*vssadmin(?:\.exe)?\s+delete\s+shadows

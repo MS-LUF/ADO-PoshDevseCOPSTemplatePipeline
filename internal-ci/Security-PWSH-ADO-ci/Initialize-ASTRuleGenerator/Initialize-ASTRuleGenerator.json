@@ -1,0 +1,440 @@
+{
+    "encodingcheck": "Enable",
+    "rules": [
+        {
+            "Status": "Enable",
+            "Name": "Backtick in a member name",
+            "ASTType": "MemberExpressionAst",
+            "ASTProperty": "Member.Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["`[A-Za-z0-9]"],
+            "Message": "Member name hidden with backticks (ATT&CK T1027.010)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Backtick in a variable name",
+            "ASTType": "VariableExpressionAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["`"],
+            "Message": "Variable name hidden with backticks (ATT&CK T1027.010)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Backtick in a command name",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["^(?:[&.]\\s*)?[^\\s`]*`[A-Za-z0-9]"],
+            "Message": "Command name hidden with backticks (ATT&CK T1027.010)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Variable name made of symbols",
+            "ASTType": "VariableExpressionAst",
+            "ASTProperty": "VariablePath.UserPath",
+            "Operator": "match",
+            "SearchStringPattern": ["^[^A-Za-z0-9]{3,}$"],
+            "Message": "Variable name made of symbols only (ATT&CK T1027.010)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Reordered format string",
+            "ASTType": "StringConstantExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["^\\{[1-9]\\d*\\}(\\{\\d+\\})+$"],
+            "Message": "Format string that reorders its pieces (ATT&CK T1027.010)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Computed command name",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["^[&.]\\s*\\(\\s*(?:[\"']|\\$[\\w:]+\\[|\\$\\{|\\()"],
+            "Message": "Command name built by an expression (ATT&CK T1027.010)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Characters picked from well-known variables",
+            "ASTType": "IndexExpressionAst",
+            "ASTProperty": "Target.Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\$\\{?(env:comspec|pshome|shellid|verbosepreference|env:public|env:windir)\\}?$"],
+            "Message": "Characters taken from a well-known variable to spell a command (ATT&CK T1027.010)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Code run through ExecutionContext",
+            "ASTType": "MemberExpressionAst",
+            "ASTProperty": "Member.Value",
+            "Operator": "eq",
+            "SearchStringPattern": ["InvokeScript", "NewScriptBlock"],
+            "Message": "Code run through ExecutionContext (ATT&CK T1059.001)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Computed member name",
+            "ASTType": "MemberExpressionAst",
+            "ASTProperty": "Member.Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["^\\("],
+            "Message": "Member name built by an expression (ATT&CK T1027.010)",
+            "Severity": "info"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Many char casts",
+            "ASTType": "ConvertExpressionAst",
+            "ASTProperty": "Type.TypeName.Name",
+            "Operator": "eq",
+            "SearchStringPattern": ["char"],
+            "Message": "One of many casts to char, as used to spell code character by character (ATT&CK T1027.010)",
+            "Severity": "warning",
+            "MinimumCount": 10
+        },
+        {
+            "Status": "Enable",
+            "Name": "Many bitwise xor",
+            "ASTType": "BinaryExpressionAst",
+            "ASTProperty": "Operator",
+            "Operator": "eq",
+            "SearchStringPattern": ["Bxor"],
+            "Message": "One of many xor operations, as used to decode content (ATT&CK T1140)",
+            "Severity": "warning",
+            "MinimumCount": 5
+        },
+        {
+            "Status": "Enable",
+            "Name": "Many quoted member names",
+            "ASTType": "MemberExpressionAst",
+            "ASTProperty": "Member.Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["^[\"']"],
+            "Message": "One of many member names written as strings (ATT&CK T1027.010)",
+            "Severity": "info",
+            "MinimumCount": 20
+        },
+        {
+            "Status": "Enable",
+            "Name": "Encoded command",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\s*(?:&\\s*)?[\"']?(?:powershell|pwsh)(?:\\.exe)?[\"']?\\s(?:.*\\s)?-e(?:c|n|nc|nco\\w*)?\\s+[A-Za-z0-9+/=]{16,}"],
+            "Message": "PowerShell started with an encoded command (ATT&CK T1027, T1059.001)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Hidden or policy-bypassing PowerShell",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": [
+                "(?i)^\\s*(?:&\\s*)?[\"']?(?:powershell|pwsh)(?:\\.exe)?[\"']?\\s(?:.*\\s)?-w(?:i|in|ind\\w*)?\\s+h",
+                "(?i)^\\s*(?:&\\s*)?[\"']?(?:powershell|pwsh)(?:\\.exe)?[\"']?\\s(?:.*\\s)?-ex(?:ec\\w*)?\\s+bypass",
+                "(?i)^\\s*(?:&\\s*)?[\"']?(?:powershell|pwsh)(?:\\.exe)?[\"']?\\s(?:.*\\s)?-ep\\s+(?:bypass|unrestricted)\\b"
+            ],
+            "Message": "PowerShell started hidden or bypassing the execution policy (ATT&CK T1564.003, T1059.001)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "AMSI tampering",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "like",
+            "SearchStringPattern": ["*AmsiUtils*", "*amsiInitFailed*", "*AmsiScanBuffer*", "*amsiContext*"],
+            "Message": "Reference to AMSI internals (ATT&CK T1562.001)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Defender tampering",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\s*(?:Set|Add)-MpPreference\\b.*\\s-(?:Disable\\w+|Exclusion\\w+)"],
+            "Message": "Microsoft Defender settings weakened (ATT&CK T1562.001)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Download method",
+            "ASTType": "MemberExpressionAst",
+            "ASTProperty": "Member.Value",
+            "Operator": "eq",
+            "SearchStringPattern": ["DownloadString", "DownloadData", "DownloadFile", "DownloadStringAsync", "DownloadFileAsync"],
+            "Message": "Download method called (ATT&CK T1105)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Downloaded code run",
+            "ASTType": "PipelineAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": [
+                "(?i)\\b(?:iex|invoke-expression)\\b.*\\b(?:downloadstring|downloaddata)\\b",
+                "(?i)\\b(?:invoke-webrequest|iwr|invoke-restmethod|irm|downloadstring)\\b.*\\|\\s*(?:iex|invoke-expression)\\b"
+            ],
+            "Message": "Downloaded content run as code (ATT&CK T1105, T1059.001)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Invoke-Expression call",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\s*(?:iex|invoke-expression)\\b"],
+            "Message": "Code run from a string (ATT&CK T1059.001)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Memory injection API",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["\\b(?:VirtualAlloc(?:Ex)?|VirtualProtect|CreateRemoteThread|WriteProcessMemory|NtCreateThreadEx|QueueUserAPC|GetDelegateForFunctionPointer)\\b"],
+            "Message": "Windows API used for code injection named in a string (ATT&CK T1055)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Memory injection API call",
+            "ASTType": "MemberExpressionAst",
+            "ASTProperty": "Member.Value",
+            "Operator": "eq",
+            "SearchStringPattern": ["VirtualAlloc", "VirtualAllocEx", "VirtualProtect", "CreateRemoteThread", "WriteProcessMemory", "GetDelegateForFunctionPointer"],
+            "Message": "Windows API used for code injection called (ATT&CK T1055)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Credential dumping",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)sekurlsa::|lsadump::|\\bInvoke-Mimikatz\\b|MiniDumpWriteDump"],
+            "Message": "Credential dumping tool or technique named in a string (ATT&CK T1003.001)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Credential dumping command",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\s*Invoke-Mimikatz\\b", "(?i)rundll32(?:\\.exe)?\\s.*comsvcs(?:\\.dll)?.*minidump"],
+            "Message": "Credential dumping command (ATT&CK T1003.001)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Recovery inhibited",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": [
+                "(?i)^\\s*vssadmin(?:\\.exe)?\\s+delete\\s+shadows",
+                "(?i)^\\s*wbadmin(?:\\.exe)?\\s+delete",
+                "(?i)^\\s*bcdedit(?:\\.exe)?\\s.*recoveryenabled\\s+no",
+                "(?i)^\\s*wmic(?:\\.exe)?\\s+shadowcopy\\s+delete"
+            ],
+            "Message": "Backups or shadow copies deleted (ATT&CK T1490)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Logs or history cleared",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": [
+                "(?i)^\\s*Clear-EventLog\\b",
+                "(?i)^\\s*wevtutil(?:\\.exe)?\\s+(?:cl|clear-log)\\b",
+                "(?i)^\\s*Remove-Item\\b.*(?:HistorySavePath|ConsoleHost_history)",
+                "(?i)^\\s*Set-PSReadLineOption\\b.*-HistorySaveStyle\\s+SaveNothing"
+            ],
+            "Message": "Event logs or command history cleared (ATT&CK T1070.001, T1070.003)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Scheduled task or service created",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": [
+                "(?i)^\\s*Register-ScheduledTask\\b",
+                "(?i)^\\s*schtasks(?:\\.exe)?\\s+/create\\b",
+                "(?i)^\\s*New-Service\\b",
+                "(?i)^\\s*sc(?:\\.exe)?\\s+create\\b"
+            ],
+            "Message": "Scheduled task or service created (ATT&CK T1053.005, T1543.003)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Run key written",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)\\\\CurrentVersion\\\\Run(?:Once)?\\\\?$"],
+            "Message": "Autostart registry key (ATT&CK T1547.001)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "WMI event subscription",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["^(?:__EventFilter|CommandLineEventConsumer|ActiveScriptEventConsumer|__FilterToConsumerBinding)$"],
+            "Message": "WMI event subscription class (ATT&CK T1546.003)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Raw TCP client",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^(?:System\\.)?Net\\.Sockets\\.TCPClient$"],
+            "Message": "Raw TCP connection, as used by reverse shells (ATT&CK T1095)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Script block built from text",
+            "ASTType": "InvokeMemberExpressionAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\[(?:System\\.Management\\.Automation\\.)?ScriptBlock\\]::Create\\("],
+            "Message": "Script block built from a string (ATT&CK T1059.001)",
+            "Severity": "info"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Native API import",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["DllImport\\s*\\("],
+            "Message": "Native function imported (ATT&CK T1106)",
+            "Severity": "info"
+        },
+        {
+            "Status": "Enable",
+            "Name": "PowerShell logging tampering",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["^(?:cachedGroupPolicySettings|signatures)$"],
+            "Message": "PowerShell logging internals accessed (ATT&CK T1562.002)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Reflective assembly load",
+            "ASTType": "InvokeMemberExpressionAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\[(?:System\\.)?Reflection\\.Assembly\\]::(?:Load|LoadFile|LoadFrom|UnsafeLoadFrom)\\(\\s*[^\\s'\"]"],
+            "Message": "Assembly loaded from bytes or a computed path (ATT&CK T1620)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Execution policy weakened",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\s*Set-ExecutionPolicy\\b.*\\b(?:Bypass|Unrestricted)\\b"],
+            "Message": "Execution policy set to Bypass or Unrestricted (ATT&CK T1059.001)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "PowerShell 2 downgrade",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\s*(?:&\\s*)?[\"']?powershell(?:\\.exe)?[\"']?\\s(?:.*\\s)?-v(?:e|er|ers|ersi|ersio|ersion)?\\s+2(?:\\.0)?(?:\\s|$)"],
+            "Message": "PowerShell 2 started, which has no script block logging or AMSI (ATT&CK T1562.010)",
+            "Severity": "error"
+        },
+        {
+            "Status": "Enable",
+            "Name": "PowerShell logging policy value",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["^(?:EnableScriptBlockLogging|EnableScriptBlockInvocationLogging|EnableModuleLogging|EnableTranscripting)$"],
+            "Message": "PowerShell logging policy value referenced (ATT&CK T1562.002)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Paste or file-sharing host URL",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)https?://(?:[^/\\s]*\\.)?(?:pastebin\\.com|paste\\.ee|hastebin\\.com|transfer\\.sh|ngrok(?:-free)?\\.(?:io|app|dev)|bit\\.ly|tinyurl\\.com|discord(?:app)?\\.com/api/webhooks|cdn\\.discordapp\\.com)"],
+            "Message": "URL on a paste, file-sharing, tunnelling or link-shortening service (ATT&CK T1102, T1105)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "GitHub raw or gist URL",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)https?://(?:raw|gist)\\.githubusercontent\\.com"],
+            "Message": "URL to raw GitHub or gist content (ATT&CK T1105)",
+            "Severity": "info"
+        },
+        {
+            "Status": "Enable",
+            "Name": "URL to a bare IP address",
+            "ASTType": "ExpressionAst",
+            "ASTProperty": "Value",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)\\bhttps?://(?!127\\.|0\\.0\\.0\\.0|localhost)\\d{1,3}(?:\\.\\d{1,3}){3}\\b"],
+            "Message": "URL to an IP address instead of a host name (ATT&CK T1105, T1071.001)",
+            "Severity": "warning"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Hex decoding",
+            "ASTType": "InvokeMemberExpressionAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\[(?:System\\.)?Convert\\]::To(?:Byte|Int16|Int32|Char)\\(.*,\\s*16\\s*\\)$"],
+            "Message": "Hexadecimal text converted to numbers, as used to decode content (ATT&CK T1140)",
+            "Severity": "info"
+        },
+        {
+            "Status": "Enable",
+            "Name": "Hidden Start-Process",
+            "ASTType": "CommandAst",
+            "ASTProperty": "Extent.Text",
+            "Operator": "match",
+            "SearchStringPattern": ["(?i)^\\s*Start-Process\\b.*-W(?:indowStyle)?\\s+Hidden\\b"],
+            "Message": "Process started with a hidden window (ATT&CK T1564.003)",
+            "Severity": "info"
+        }
+    ]
+}

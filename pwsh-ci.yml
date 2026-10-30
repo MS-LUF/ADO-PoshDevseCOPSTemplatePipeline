@@ -1,0 +1,482 @@
+# Extends template: the PowerShell CI stage of a repository.
+#   A1 - security analysis with the Initialize-ASTRuleGenerator rules (fails on an Error finding
+#        or a file that does not parse)
+#   A2 - coding practice with the default PSScriptAnalyzer rules (same failure rule)
+#   A3 - the repository's Pester tests, after A1 and A2, since the tests run the committed code
+#   B1 - the SBOM of the repository (CycloneDX), on every build, the base branch included
+#   B2 - known vulnerabilities (Grype) in the SBOM and the lockfiles; fails on a High or Critical
+#        finding that has a fix
+#   B3 - publishes the SBOM to Dependency-Track, on the base branch only, when
+#        dependencyTrackVariableGroup is set
+#   C1 - packs the module into a .nupkg, on every build publishPackage is on, after stages A
+#        and B
+#   C2 - pushes the .nupkg to the feed, on tag builds only
+#
+# The job scripts, rules and tools run from this repository, never from the repository under
+# test, so a branch cannot change its own scanner, rules or allow-list.
+#
+# The pipeline that extends this template must declare this repository as a resource with the
+# alias TemplatePipeline: the jobs check it out by that alias, at the ref the pipeline pins
+# (a release tag), so the template and its scripts come from the same commit.
+#
+#   resources:
+#     repositories:
+#     - repository: TemplatePipeline
+#       type: git
+#       name: LABIA/TemplatePipeline
+#       ref: refs/tags/v1.6.3
+#   extends:
+#     template: pwsh-ci.yml@TemplatePipeline
+#
+# Each job runs on the Microsoft-hosted vmImage, or on the self-hosted pool poolName when it is
+# set (Azure DevOps Server has no Microsoft-hosted agents). Every checkout cleans its folder
+# (clean: true): a self-hosted agent keeps its work folder between runs, and the pipeline's own
+# clean setting is not the template's to rely on.
+
+parameters:
+- name: baseBranch # every commit since the branch left it is analysed; the stage is skipped on it
+  type: string
+  default: main
+- name: testPath # Pester test folder, relative to the repository root
+  type: string
+  default: Tests
+- name: securityExceptionsFile # A1: the false-positive exceptions file, read from the base branch only; empty, .security/a1-exceptions.json
+  type: string
+  default: ''
+- name: runPester
+  type: boolean
+  default: true
+- name: vmImage # a Microsoft-hosted image, used when poolName is empty
+  type: string
+  default: ubuntu-latest
+- name: poolName # a self-hosted agent pool (Linux, pwsh 7.4 or later), required on Azure DevOps Server
+  type: string
+  default: ''
+- name: runSupplyChain # stage B: the SBOM and the known-vulnerability check
+  type: boolean
+  default: true
+- name: dependencyTrackVariableGroup # B3: the variable group holding DependencyTrackUrl and DependencyTrackApiKey; empty, no upload
+  type: string
+  default: ''
+- name: dependencyTrackProjectName # B3: the Dependency-Track project; empty, the repository's name
+  type: string
+  default: ''
+- name: publishPackage # stage C: pack the module into a .nupkg on every build, publish it on tag builds
+  type: boolean
+  default: false
+- name: packageSpec # C1: the module manifest (.psd1) to pack, relative to the repository root; empty, the single root manifest
+  type: string
+  default: ''
+- name: publishFeed # C1 checks it, C2 pushes to it: the feed's https v3 URL (the "Connect to feed" pane of the Azure Artifacts feed)
+  type: string
+  default: ''
+- name: publishServiceConnection # C2: a NuGet service connection (username/password or token, not an API key) for a feed outside the organization; empty, the build identity
+  type: string
+  default: ''
+# Not a setting: where this template's scripts sit in its checkout (ci-tools). It is a parameter
+# only so that it is written once; its single allowed value makes the template engine refuse any
+# other, so an extending pipeline cannot point a job at scripts of its own. A copy of this
+# template hosted in a subfolder of its repository (for example e2e/powershell) changes the
+# default and the allowed value together, to $(Pipeline.Workspace)/ci-tools/e2e/powershell.
+- name: ciToolsRoot
+  type: string
+  default: '$(Pipeline.Workspace)/ci-tools'
+  values:
+  - '$(Pipeline.Workspace)/ci-tools'
+
+stages:
+- stage: A
+  # Compared at compile time, with baseBranch as a value (format), so that the run gets a plain
+  # True or False: pasted into the runtime expression, a ' in the value could change the
+  # condition (backlog item 39).
+  condition: ${{ ne(variables['Build.SourceBranch'], format('refs/heads/{0}', parameters.baseBranch)) }}
+  displayName: "Stage A - PWSH Tests and Controls"
+  jobs:
+  - job: SecurityTest
+    displayName: "Job A1 - PWSH Security Controls"
+    pool:
+      ${{ if eq(parameters.poolName, '') }}:
+        vmImage: ${{ parameters.vmImage }}
+      ${{ if ne(parameters.poolName, '') }}:
+        name: ${{ parameters.poolName }}
+    steps:
+      - checkout: self
+        clean: true
+        path: self
+        fetchDepth: 0 # full history: every commit of the branch since the base branch is analysed
+      - checkout: TemplatePipeline
+        clean: true
+        path: ci-tools
+      - task: PowerShell@2
+        inputs:
+          targetType: 'filePath'
+          filePath: '${{ parameters.ciToolsRoot }}/sec-pwsh-analysis-malicious.ps1'
+          # Parameter values go through the environment, never into this command line: the
+          # arguments input is run as PowerShell, and a value from the extending pipeline (which
+          # each branch edits) would run as code in this job (backlog item 39). Every $ is
+          # removed from them at compile time, so that no $(...) macro can make the agent put a
+          # secret such as System.AccessToken into the environment of a job that runs the
+          # branch's code (A3). The other jobs pass their values the same way.
+          arguments: '-RepositoryPath "$(Pipeline.Workspace)/self" -BaseBranch $env:CI_BASE_BRANCH -ExceptionFile $env:CI_A1_EXCEPTION_FILE'
+          workingDirectory: '$(Pipeline.Workspace)/self'
+        env:
+          CI_BASE_BRANCH: ${{ replace(parameters.baseBranch, '$', '') }}
+          CI_A1_EXCEPTION_FILE: ${{ replace(parameters.securityExceptionsFile, '$', '') }}
+      - task: CopyFiles@2
+        condition: Failed()
+        inputs:
+          sourceFolder: '${{ parameters.ciToolsRoot }}'
+          contents: 'Logs/*.log'
+          targetFolder: '$(Build.ArtifactStagingDirectory)'
+      - task: PublishBuildArtifacts@1
+        condition: Failed()
+        inputs:
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+          ArtifactName: 'sec-pwsh-analysis-failure-log'
+  - job: CodingPracticeTest
+    displayName: "Job A2 - PWSH Coding Practice Controls"
+    pool:
+      ${{ if eq(parameters.poolName, '') }}:
+        vmImage: ${{ parameters.vmImage }}
+      ${{ if ne(parameters.poolName, '') }}:
+        name: ${{ parameters.poolName }}
+    steps:
+      - checkout: self
+        clean: true
+        path: self
+        fetchDepth: 0
+      - checkout: TemplatePipeline
+        clean: true
+        path: ci-tools
+      - task: PowerShell@2
+        inputs:
+          targetType: 'filePath'
+          filePath: '${{ parameters.ciToolsRoot }}/tec-pwsh-analysis-practice.ps1'
+          arguments: '-RepositoryPath "$(Pipeline.Workspace)/self" -BaseBranch $env:CI_BASE_BRANCH'
+          workingDirectory: '$(Pipeline.Workspace)/self'
+        env:
+          CI_BASE_BRANCH: ${{ replace(parameters.baseBranch, '$', '') }}
+      - task: CopyFiles@2
+        condition: Failed()
+        inputs:
+          sourceFolder: '${{ parameters.ciToolsRoot }}'
+          contents: 'Logs/*.log'
+          targetFolder: '$(Build.ArtifactStagingDirectory)'
+      - task: PublishBuildArtifacts@1
+        condition: Failed()
+        inputs:
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+          ArtifactName: 'tec-pwsh-analysis-failure-log'
+  - ${{ if parameters.runPester }}:
+    # The tests run the committed code, so they wait for both analysis jobs to pass.
+    - job: PesterTest
+      displayName: "Job A3 - PWSH Pester Tests"
+      dependsOn:
+      - SecurityTest
+      - CodingPracticeTest
+      pool:
+        ${{ if eq(parameters.poolName, '') }}:
+          vmImage: ${{ parameters.vmImage }}
+        ${{ if ne(parameters.poolName, '') }}:
+          name: ${{ parameters.poolName }}
+      steps:
+        - checkout: self
+          clean: true
+          path: self
+          fetchDepth: 0
+        - checkout: TemplatePipeline
+          clean: true
+          path: ci-tools
+        - task: PowerShell@2
+          inputs:
+            targetType: 'filePath'
+            filePath: '${{ parameters.ciToolsRoot }}/biz-pwsh-analysis-pester.ps1'
+            arguments: '-RepositoryPath "$(Pipeline.Workspace)/self" -BaseBranch $env:CI_BASE_BRANCH -TestPath $env:CI_TEST_PATH'
+            workingDirectory: '$(Pipeline.Workspace)/self'
+          env:
+            CI_BASE_BRANCH: ${{ replace(parameters.baseBranch, '$', '') }}
+            CI_TEST_PATH: ${{ replace(parameters.testPath, '$', '') }}
+        - task: PublishTestResults@2
+          condition: succeededOrFailed()
+          inputs:
+            testResultsFormat: 'NUnit'
+            testResultsFiles: 'Logs/pester-testresults.xml'
+            searchFolder: '${{ parameters.ciToolsRoot }}'
+            failTaskOnMissingResultsFile: false
+            testRunTitle: 'Pester'
+        - task: CopyFiles@2
+          condition: Failed()
+          inputs:
+            sourceFolder: '${{ parameters.ciToolsRoot }}'
+            contents: |
+              Logs/*.log
+              Logs/*.xml
+            targetFolder: '$(Build.ArtifactStagingDirectory)'
+        - task: PublishBuildArtifacts@1
+          condition: Failed()
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            ArtifactName: 'biz-pwsh-pester-failure-log'
+- ${{ if parameters.runSupplyChain }}:
+  # Stage B reads the files and never runs the branch's code, so it runs next to stage A, and on
+  # the base branch too: a CVE published today concerns the released code.
+  - stage: B
+    dependsOn: []
+    displayName: "Stage B - PWSH Supply Chain"
+    jobs:
+    - job: SbomInventory
+      displayName: "Job B1 - PWSH SBOM"
+      pool:
+        ${{ if eq(parameters.poolName, '') }}:
+          vmImage: ${{ parameters.vmImage }}
+        ${{ if ne(parameters.poolName, '') }}:
+          name: ${{ parameters.poolName }}
+      variables:
+        # The repository resource's ref is read with a runtime expression: there is no
+        # $(resources.repositories...) macro, and an unexpanded $(...) runs as a PowerShell command.
+        templateRef: $[ resources.repositories['TemplatePipeline'].ref ]
+      steps:
+        - checkout: self
+          clean: true
+          path: self
+          fetchDepth: 1 # the tested commit only: the SBOM covers its files, not a range
+        - checkout: TemplatePipeline
+          clean: true
+          path: ci-tools
+        - task: PowerShell@2
+          inputs:
+            targetType: 'filePath'
+            filePath: '${{ parameters.ciToolsRoot }}/tec-pwsh-sbom-inventory.ps1'
+            # The ref goes through the environment, so its text is never parsed as PowerShell.
+            arguments: '-RepositoryPath "$(Pipeline.Workspace)/self" -TemplateRef $env:TEMPLATE_REF'
+            workingDirectory: '$(Pipeline.Workspace)/self'
+          env:
+            TEMPLATE_REF: $(templateRef)
+        - task: CopyFiles@2
+          inputs:
+            sourceFolder: '${{ parameters.ciToolsRoot }}/Logs'
+            contents: 'sbom.cdx.json'
+            targetFolder: '$(Build.ArtifactStagingDirectory)/sbom'
+        - task: PublishBuildArtifacts@1
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)/sbom'
+            ArtifactName: 'tec-pwsh-sbom'
+        - task: CopyFiles@2
+          condition: Failed()
+          inputs:
+            sourceFolder: '${{ parameters.ciToolsRoot }}'
+            contents: 'Logs/*.log'
+            targetFolder: '$(Build.ArtifactStagingDirectory)/log'
+        - task: PublishBuildArtifacts@1
+          condition: Failed()
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)/log'
+            ArtifactName: 'tec-pwsh-sbom-failure-log'
+    - job: CveAnalysis
+      displayName: "Job B2 - PWSH Known Vulnerabilities"
+      dependsOn: SbomInventory
+      pool:
+        ${{ if eq(parameters.poolName, '') }}:
+          vmImage: ${{ parameters.vmImage }}
+        ${{ if ne(parameters.poolName, '') }}:
+          name: ${{ parameters.poolName }}
+      steps:
+        - checkout: self
+          clean: true
+          path: self
+          fetchDepth: 1
+        - checkout: TemplatePipeline
+          clean: true
+          path: ci-tools
+        - task: DownloadBuildArtifacts@1
+          inputs:
+            buildType: 'current'
+            downloadType: 'single'
+            artifactName: 'tec-pwsh-sbom'
+            downloadPath: '$(Pipeline.Workspace)/sbom'
+            cleanDestinationFolder: true # a self-hosted agent keeps the last run's SBOM there
+        - task: PowerShell@2
+          inputs:
+            targetType: 'filePath'
+            filePath: '${{ parameters.ciToolsRoot }}/sec-pwsh-analysis-cve.ps1'
+            arguments: '-RepositoryPath "$(Pipeline.Workspace)/self" -SbomPath "$(Pipeline.Workspace)/sbom/tec-pwsh-sbom/sbom.cdx.json"'
+            workingDirectory: '$(Pipeline.Workspace)/self'
+        # The report is published on every run, failed or not: it is part of the build's record.
+        - task: CopyFiles@2
+          condition: succeededOrFailed()
+          inputs:
+            sourceFolder: '${{ parameters.ciToolsRoot }}'
+            contents: |
+              Logs/*.log
+              Logs/cve-*
+            targetFolder: '$(Build.ArtifactStagingDirectory)'
+        - task: PublishBuildArtifacts@1
+          condition: succeededOrFailed()
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            ArtifactName: 'sec-pwsh-cve-report'
+    # B3 exists only on a build of the base branch, decided when the pipeline is compiled: the
+    # variable group's checks run when a stage that uses it starts, so a group referenced on a
+    # branch build would fail its Branch control check and stop stage B. Branch builds never
+    # reference the group, and never get the key.
+    - ${{ if and(ne(parameters.dependencyTrackVariableGroup, ''), eq(variables['Build.SourceBranch'], format('refs/heads/{0}', parameters.baseBranch))) }}:
+      - job: SbomPublish
+        displayName: "Job B3 - PWSH SBOM to Dependency-Track"
+        dependsOn: SbomInventory
+        pool:
+          ${{ if eq(parameters.poolName, '') }}:
+            vmImage: ${{ parameters.vmImage }}
+          ${{ if ne(parameters.poolName, '') }}:
+            name: ${{ parameters.poolName }}
+        variables:
+        - group: ${{ parameters.dependencyTrackVariableGroup }}
+        steps:
+          # No checkout of the repository under test: B3 needs only B1's SBOM.
+          - checkout: TemplatePipeline
+            clean: true
+            path: ci-tools
+          - task: DownloadBuildArtifacts@1
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'tec-pwsh-sbom'
+              downloadPath: '$(Pipeline.Workspace)/sbom'
+              cleanDestinationFolder: true
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: '${{ parameters.ciToolsRoot }}/tec-pwsh-sbom-publish.ps1'
+              arguments: '-SbomPath "$(Pipeline.Workspace)/sbom/tec-pwsh-sbom/sbom.cdx.json"'
+              workingDirectory: '${{ parameters.ciToolsRoot }}'
+            # Every value goes through the environment, so none is parsed as PowerShell in the
+            # process that holds the key. A secret variable reaches a script only this way.
+            env:
+              DEPENDENCYTRACK_URL: $(DependencyTrackUrl)
+              DEPENDENCYTRACK_APIKEY: $(DependencyTrackApiKey)
+              DEPENDENCYTRACK_PROJECT_NAME: ${{ replace(parameters.dependencyTrackProjectName, '$', '') }}
+              DEPENDENCYTRACK_PROJECT_VERSION: ${{ replace(parameters.baseBranch, '$', '') }}
+              DEPENDENCYTRACK_PROJECT_TAG: $(System.TeamProject)
+          - task: CopyFiles@2
+            condition: Failed()
+            inputs:
+              sourceFolder: '${{ parameters.ciToolsRoot }}'
+              contents: 'Logs/*.log'
+              targetFolder: '$(Build.ArtifactStagingDirectory)'
+          - task: PublishBuildArtifacts@1
+            condition: Failed()
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: 'tec-pwsh-sbom-publish-failure-log'
+- ${{ if parameters.publishPackage }}:
+  # Stage C packs the module on every build (so a PR that breaks the packaging fails before
+  # the merge) and pushes it only on tag builds: the tag is the release, and a base-branch
+  # build pushing the same version would make the tag's push fail on the duplicate.
+  # It waits for stages A and B, named explicitly: by default a stage depends only on the
+  # stage just before it. Stage A is skipped on the base branch, and a skipped dependency
+  # would skip stage C under the default condition, hence not(failed()): a failed A or B
+  # still stops it, so an analysis finding or a fixable High or Critical finding is never
+  # published.
+  - stage: C
+    displayName: "Stage C - PWSH Package Publish"
+    dependsOn:
+    - A
+    - ${{ if parameters.runSupplyChain }}:
+      - B
+    condition: and(not(failed()), not(canceled()))
+    jobs:
+    - job: PackagePack
+      displayName: "Job C1 - PWSH Package Pack"
+      pool:
+        ${{ if eq(parameters.poolName, '') }}:
+          vmImage: ${{ parameters.vmImage }}
+        ${{ if ne(parameters.poolName, '') }}:
+          name: ${{ parameters.poolName }}
+      steps:
+        - checkout: self
+          clean: true
+          path: self
+          fetchDepth: 1 # the pack covers the tested commit's files, not a range
+        - checkout: TemplatePipeline
+          clean: true
+          path: ci-tools
+        - task: PowerShell@2
+          inputs:
+            targetType: 'filePath'
+            filePath: '${{ parameters.ciToolsRoot }}/tec-pwsh-package-pack.ps1'
+            arguments: '-RepositoryPath "$(Pipeline.Workspace)/self" -PackageSpec $env:CI_PACKAGE_SPEC -PublishFeed $env:CI_PUBLISH_FEED'
+            workingDirectory: '$(Pipeline.Workspace)/self'
+          env:
+            CI_PACKAGE_SPEC: ${{ replace(parameters.packageSpec, '$', '') }}
+            CI_PUBLISH_FEED: ${{ replace(parameters.publishFeed, '$', '') }}
+        - task: CopyFiles@2
+          inputs:
+            sourceFolder: '${{ parameters.ciToolsRoot }}/Logs'
+            contents: '*.nupkg'
+            targetFolder: '$(Build.ArtifactStagingDirectory)/package'
+        - task: PublishBuildArtifacts@1
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)/package'
+            ArtifactName: 'pub-pwsh-package'
+        - task: CopyFiles@2
+          condition: Failed()
+          inputs:
+            sourceFolder: '${{ parameters.ciToolsRoot }}'
+            contents: 'Logs/*.log'
+            targetFolder: '$(Build.ArtifactStagingDirectory)/log'
+        - task: PublishBuildArtifacts@1
+          condition: Failed()
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)/log'
+            ArtifactName: 'tec-pwsh-pack-failure-log'
+    # C2 exists only on tag builds, decided at compile time (Build.SourceBranch is available in
+    # templates), as B3: a service connection's checks run when a stage that uses it starts,
+    # even for a job a run-time condition then skips, so a connection referenced on a branch
+    # build would stop C1 there too. Its default condition waits for C1's success.
+    - ${{ if startsWith(variables['Build.SourceBranch'], 'refs/tags/') }}:
+      - job: PackagePush
+        displayName: "Job C2 - PWSH Package Push"
+        dependsOn: PackagePack
+        pool:
+          ${{ if eq(parameters.poolName, '') }}:
+            vmImage: ${{ parameters.vmImage }}
+          ${{ if ne(parameters.poolName, '') }}:
+            name: ${{ parameters.poolName }}
+        steps:
+          # No checkout of the repository under test: C2 pushes only the packed .nupkg.
+          - checkout: TemplatePipeline
+            clean: true
+            path: ci-tools
+          - task: DownloadBuildArtifacts@1
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'pub-pwsh-package'
+              downloadPath: '$(Pipeline.Workspace)/package'
+              cleanDestinationFolder: true
+          # The build identity authenticates to the feed; a service connection is used only
+          # for a feed outside the organization. The task hands the credentials to the
+          # credential provider itself, never through the command line. It does not take an
+          # API-key service connection: nuget.org and PSGallery are out of reach.
+          - task: NuGetAuthenticate@1
+            ${{ if ne(parameters.publishServiceConnection, '') }}:
+              inputs:
+                nuGetServiceConnections: ${{ parameters.publishServiceConnection }}
+          - task: PowerShell@2
+            inputs:
+              targetType: 'filePath'
+              filePath: '${{ parameters.ciToolsRoot }}/pub-pwsh-package-push.ps1'
+              arguments: '-PackageFolder "$(Pipeline.Workspace)/package/pub-pwsh-package" -PublishFeed $env:CI_PUBLISH_FEED'
+              workingDirectory: '${{ parameters.ciToolsRoot }}'
+            env:
+              CI_PUBLISH_FEED: ${{ replace(parameters.publishFeed, '$', '') }}
+          - task: CopyFiles@2
+            condition: Failed()
+            inputs:
+              sourceFolder: '${{ parameters.ciToolsRoot }}'
+              contents: 'Logs/*.log'
+              targetFolder: '$(Build.ArtifactStagingDirectory)'
+          - task: PublishBuildArtifacts@1
+            condition: Failed()
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: 'pub-pwsh-push-failure-log'
