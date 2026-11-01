@@ -77,8 +77,8 @@ Do this once per organization (Services) or collection (Server).
    ```bash
    git clone --bare <source-url-of-TemplatePipeline> TemplatePipeline.git
    cd TemplatePipeline.git
-   # Services: https://dev.azure.com/<organization>/LABIA/_git/TemplatePipeline
-   # Server:   https://<server>/<collection>/LABIA/_git/TemplatePipeline
+   # Services: https://dev.azure.com/<organization>/<project>/_git/TemplatePipeline
+   # Server:   https://<server>/<collection>/<project>/_git/TemplatePipeline
    git push --mirror <your-new-repository-url>
    ```
 
