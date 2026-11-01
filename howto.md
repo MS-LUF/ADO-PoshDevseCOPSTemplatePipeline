@@ -77,8 +77,8 @@ Do this once per organization (Services) or collection (Server).
    ```bash
    git clone --bare <source-url-of-TemplatePipeline> TemplatePipeline.git
    cd TemplatePipeline.git
-   # Services: https://dev.azure.com/<organization>/<project>/_git/TemplatePipeline
-   # Server:   https://<server>/<collection>/<project>/_git/TemplatePipeline
+   # Services: https://dev.azure.com/<organization>/LABIA/_git/TemplatePipeline
+   # Server:   https://<server>/<collection>/LABIA/_git/TemplatePipeline
    git push --mirror <your-new-repository-url>
    ```
 
@@ -183,7 +183,7 @@ resources:
   - repository: TemplatePipeline   # the alias the template checks out: keep it
     type: git
     name: LABIA/TemplatePipeline   # <project>/<repository> of step 1
-    ref: refs/tags/v1.7.0          # a release tag of step 2
+    ref: refs/tags/v1.7.1          # a release tag of step 2
 
 extends:
   template: pwsh-ci.yml@TemplatePipeline
@@ -287,7 +287,7 @@ needs `v1.5.0` or later.
    - **Branch control**: allowed branches `refs/heads/main`, and *Verify branch protection*
      on;
    - **Required template**: *Azure Repos*, `LABIA/TemplatePipeline`, the release tag
-     (`refs/tags/v1.7.0`), `pwsh-ci.yml`. Update its *Ref* at each release, as in step 4.
+     (`refs/tags/v1.7.1`), `pwsh-ci.yml`. Update its *Ref* at each release, as in step 4.
 5. **The pipeline** (`azure-pipelines.yml`, through a pull request):
 
    ```yaml
@@ -378,7 +378,7 @@ resource starts only if the pipeline extends the given template, at the given re
 2. *Add check > Required template*:
    - Repository type: *Azure Repos*;
    - Repository: `LABIA/TemplatePipeline`;
-   - Ref: `refs/tags/v1.7.0`;
+   - Ref: `refs/tags/v1.7.1`;
    - Path to required template: `pwsh-ci.yml`.
 3. **Test it:** push a branch whose `azure-pipelines.yml` runs a plain script instead of
    `extends`; its run must fail on the check. Then delete the branch.

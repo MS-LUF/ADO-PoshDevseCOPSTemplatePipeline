@@ -55,8 +55,9 @@ Describe 'C1 pack, happy paths' {
 
     It 'does not follow a symlink out of the module folder' -Skip:(-not (Test-SymlinkSupport)) {
         $repo = New-ModuleRepository -Name 'c1-symlink'
+        $outsideFolder = New-ScratchDirectory -Name 'c1-symlink-outside'
         try {
-            $outside = Join-Path (Split-Path -Parent $repo) 'outside-secret.txt'
+            $outside = Join-Path $outsideFolder 'outside-secret.txt'
             Set-Content -Path $outside -Value 'top secret' -NoNewline
             New-Item -ItemType SymbolicLink -Path (Join-Path $repo 'linked.txt') -Target $outside | Out-Null
             Add-GitCommit -Repository $repo -Message 'link'
@@ -64,7 +65,8 @@ Describe 'C1 pack, happy paths' {
             $r.ExitCode | Should -Be 0
             (Get-NupkgEntry -Path $r.Nupkg -Filter '*linked*') | Should -BeNullOrEmpty
         } finally {
-            Remove-Scratch -Path (Split-Path -Parent $repo)
+            Remove-Scratch -Path $repo
+            Remove-Scratch -Path $outsideFolder
         }
     }
 
@@ -171,6 +173,45 @@ Describe 'C1 pack, fail-closed cases' {
         } finally {
             Remove-Scratch -Path $bare
         }
+    }
+}
+
+Describe 'C1 tag version (item 36): a warning, never a failure' {
+    BeforeAll {
+        $script:TagRepo = New-ModuleRepository -Name 'c1-tag' -Version '2.3.0'
+    }
+
+    AfterAll {
+        Remove-Scratch -Path $script:TagRepo
+    }
+
+    It 'gives <Warnings> warning(s) on <Ref>' -ForEach @(
+        @{ Ref = 'refs/tags/v2.3.0'; Warnings = 0 }
+        @{ Ref = 'refs/tags/2.3.0'; Warnings = 0 }
+        @{ Ref = 'refs/tags/release/2.3.0'; Warnings = 0 }
+        @{ Ref = 'refs/tags/V2.3.0.0'; Warnings = 0 }
+        @{ Ref = 'refs/tags/v9.9.9'; Warnings = 1 }
+        @{ Ref = 'refs/tags/latest'; Warnings = 1 }
+        @{ Ref = 'refs/heads/v9.9.9'; Warnings = 0 }
+    ) {
+        $r = Invoke-PackResult -CiTools $script:CiTools -RepositoryPath $script:TagRepo -Environment @{ TF_BUILD = 'True'; BUILD_SOURCEBRANCH = $Ref }
+        $r.ExitCode | Should -Be 0
+        Split-Path -Leaf $r.Nupkg | Should -Be 'TestModule.2.3.0.nupkg'
+        ([regex]::Matches($r.Output, '##vso\[task\.logissue type=warning[^\r\n]*code=TagVersion')).Count | Should -Be $Warnings
+    }
+}
+
+Describe 'C1 file URI (item 35): a Linux path gives an absolute URI' {
+    BeforeAll {
+        . ([scriptblock]::Create((Get-ScriptFunctionText -ScriptName 'tec-pwsh-package-pack.ps1' -FunctionName 'ConvertTo-CIFileUri')))
+    }
+
+    It 'builds the URI of a Linux path, on any OS' {
+        ConvertTo-CIFileUri -Path '/home/vsts/work/_temp/psresource-pack-1' | Should -Be 'file:///home/vsts/work/_temp/psresource-pack-1'
+    }
+
+    It 'builds the URI of a drive path' -Skip:(-not $IsWindows) {
+        ConvertTo-CIFileUri -Path 'C:\agent\_temp\pack' | Should -Be 'file:///C:/agent/_temp/pack'
     }
 }
 

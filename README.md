@@ -1,6 +1,5 @@
-# ADO-PoshDevSecOPSTemplatePipeline
-
-Azure Pipelines extends template for the CI of PowerShell repositories: security analysis with the [Initialize-ASTRule rules](https://github.com/MS-LUF/Initialize-ASTRuleGenerator), coding-practice analysis with PSScriptAnalyzer, the repository's Pester tests, its SBOM, and a check of its components for known vulnerabilities, and packs and publishes its PowerShell module as a NuGet package.
+# TemplatePipeline
+Azure Pipelines extends template for the CI of PowerShell repositories: security analysis with the Initialize-ASTRuleGenerator rules, coding-practice analysis with PSScriptAnalyzer, the repository's Pester tests, its SBOM, and a check of its components for known vulnerabilities, and packs and publishes its PowerShell module as a NuGet package.
 
 (c) 2021-2026 lucas-cueff.com Distributed under Artistic Licence 2.0 (https://opensource.org/licenses/artistic-license-2.0).
 
@@ -40,7 +39,7 @@ resources:
   - repository: TemplatePipeline # the alias the template checks out: keep it
     type: git
     name: LABIA/TemplatePipeline
-    ref: refs/tags/v1.7.0 # a release tag; move it to take a newer release
+    ref: refs/tags/v1.7.1 # a release tag; move it to take a newer release
 
 extends:
   template: pwsh-ci.yml@TemplatePipeline
@@ -147,7 +146,7 @@ Each agent of the pool needs:
 - The first run asks to authorise the pipeline to read this repository.
 - **`ciToolsRoot` is not a setting:** it is where the template's scripts sit in its checkout, and it accepts only its default. Leave it out of your pipeline. A copy of the template hosted in a subfolder of another repository changes it (see [howto.md](howto.md), step 1), with what sharing a repository means for the template's protection and releases.
 - **Releases** are annotated tags on `main` (`v1.0.0`, ...); the tag message holds the release notes. A pipeline gets a new release, including new A1 rules, only when its `ref` moves to the new tag. A pushed tag is never moved or deleted.
-- To enforce the template, add a **Required template** check (this repository, the release tag such as `refs/tags/v1.7.0`, `pwsh-ci.yml`) to a protected resource the pipelines use, and update it with each release. Protect `main` with a branch policy, and deny **Force push** on *All tags* to everyone but the maintainers, so that a tag cannot be recreated on another commit.
+- To enforce the template, add a **Required template** check (this repository, the release tag such as `refs/tags/v1.7.1`, `pwsh-ci.yml`) to a protected resource the pipelines use, and update it with each release. Protect `main` with a branch policy, and deny **Force push** on *All tags* to everyone but the maintainers, so that a tag cannot be recreated on another commit.
 - **A3 checks quality, not security:** the tests are the branch's own code, so a branch can make them pass. Only A1 and A2 are out of its reach, and A3 runs after both.
 - **`.ps1xml` files are not analysed:** type and format files can hold code run when a module loads, but PSScriptAnalyzer cannot analyse XML. Review them by hand.
 - **The SBOM** lists the PowerShell modules the repository declares (`RequiredModules`, `NestedModules`, `#Requires -Modules`), its own modules, its `.dll` and `.exe` files with their SHA-256 (a .NET assembly under its NuGet ID), and its `packages.lock.json` packages. Nothing from the repository is run. Pin modules with `RequiredVersion`: a module without an exact version is a warning.

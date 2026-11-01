@@ -176,7 +176,9 @@ function Invoke-JobScript {
     $saved = @{}
     foreach ($name in $names) {
         $saved[$name] = [Environment]::GetEnvironmentVariable($name)
-        [Environment]::SetEnvironmentVariable($name, $null)
+        # Removed, not set to $null: PowerShell 7.5 and later (.NET 9) would leave it defined and
+        # empty, and Grype then takes an empty GRYPE_DB_UPDATE_URL as its database's address.
+        Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
     }
     $savedPath = $env:PATH
     $savedModulePath = $env:PSModulePath
@@ -184,23 +186,25 @@ function Invoke-JobScript {
         foreach ($key in $Environment.Keys) {
             [Environment]::SetEnvironmentVariable($key, [string]$Environment[$key])
         }
-        $hostExe = 'pwsh'
+        $hostName = 'pwsh'
         if ($UseWindowsPowerShell) {
-            $hostExe = 'powershell.exe'
+            $hostName = 'powershell.exe'
             $env:PSModulePath = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Modules') + [IO.Path]::PathSeparator + [Environment]::GetEnvironmentVariable('PSModulePath', 'Machine')
         }
+        # Resolved before PATH changes: on Linux, dotnet and pwsh can share /usr/bin.
+        $hostExe = @(Get-Command $hostName -CommandType Application)[0].Source
         if ($WithoutDotnet) {
-            $dotnet = Get-Command dotnet -ErrorAction SilentlyContinue
-            if ($dotnet) {
-                $dotnetDir = (Split-Path -Parent $dotnet.Source).TrimEnd('\', '/')
-                $env:PATH = (@($env:PATH -split [IO.Path]::PathSeparator | Where-Object { $_ -and $_.TrimEnd('\', '/') -ne $dotnetDir }) -join [IO.Path]::PathSeparator)
-            }
+            $dotnetDirs = @(Get-Command dotnet -All -CommandType Application -ErrorAction SilentlyContinue | ForEach-Object { (Split-Path -Parent $_.Source).TrimEnd('\', '/') })
+            $env:PATH = (@($env:PATH -split [IO.Path]::PathSeparator | Where-Object { $_ -and $dotnetDirs -notcontains $_.TrimEnd('\', '/') }) -join [IO.Path]::PathSeparator)
         }
         $output = & $hostExe @argList 2>&1 | Out-String
         return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
     } finally {
         foreach ($name in $names) {
-            [Environment]::SetEnvironmentVariable($name, $saved[$name])
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+            if ($null -ne $saved[$name]) {
+                [Environment]::SetEnvironmentVariable($name, $saved[$name])
+            }
         }
         $env:PATH = $savedPath
         $env:PSModulePath = $savedModulePath
@@ -230,6 +234,126 @@ function Get-AttackSample {
     return (Get-Content -LiteralPath (Join-Path $script:RepoRoot (Join-Path 'internal-ci' (Join-Path 'Samples' 'BaselineSample.txt'))) -Raw)
 }
 
+# The findings the attack sample must raise, from BaselineFinding.txt (line|severity|rule|message).
+function Get-BaselineFinding {
+    $path = Join-Path $script:RepoRoot (Join-Path 'internal-ci' (Join-Path 'Samples' 'BaselineFinding.txt'))
+    return @(Get-Content -LiteralPath $path | Where-Object { $_ } | ForEach-Object {
+            $fields = $_ -split '\|', 4
+            [pscustomobject]@{ Line = [int]$fields[0]; Severity = $fields[1]; RuleName = $fields[2] }
+        })
+}
+
+# The one line of the attack sample on which the given Error rule fires, taken as data at run time.
+function Get-AttackSampleLine {
+    param([Parameter(Mandatory = $true)][string]$RuleName)
+    $finding = @(Get-BaselineFinding | Where-Object { $_.RuleName -eq $RuleName -and $_.Severity -eq 'Error' })[0]
+    return (Get-AttackSample) -split '\r?\n' | Select-Object -Index ($finding.Line - 1)
+}
+
+# How many real annotations of a type a job printed; a neutralized '##vso [' does not count.
+function Get-AnnotationCount {
+    param(
+        [Parameter(Mandatory = $true)][string]$Output,
+        [Parameter(Mandatory = $true)][ValidateSet('error', 'warning')][string]$Type,
+        [string]$MessagePattern = ''
+    )
+    return ([regex]::Matches($Output, "##vso\[task\.logissue type=$Type[^\r\n]*$MessagePattern")).Count
+}
+
+# The console lines holding a ##vso[ other than the prefix of the job's own annotations.
+function Get-ForeignLoggingCommand {
+    param([Parameter(Mandatory = $true)][string]$Output)
+    return @($Output -split '\r?\n' | Where-Object {
+            $rest = if ($_.StartsWith('##vso[task.logissue ')) { $_.Substring('##vso['.Length) } else { $_ }
+            $rest.Contains('##vso[')
+        })
+}
+
+# Writes a wrapper into a ci-tools copy that does what PowerShell@2 does with a filePath task:
+# dot-sources the script with the arguments as PowerShell text. Parameter values then come from
+# the environment. -Prelude runs first, for a stand-in of a cmdlet. Returns the wrapper's name.
+function New-TaskWrapper {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    param(
+        [Parameter(Mandatory = $true)][string]$CiTools,
+        [Parameter(Mandatory = $true)][string]$ScriptName,
+        [string]$Arguments = '',
+        [string]$Prelude = ''
+    )
+    $text = "$Prelude`n. '$(Join-Path $CiTools $ScriptName)' $Arguments`nexit `$LASTEXITCODE`n"
+    Set-Content -LiteralPath (Join-Path $CiTools 'task-wrapper.ps1') -Value $text
+    return 'task-wrapper.ps1'
+}
+
+# The source of one function of a job script, taken from its AST, for the functions a job only
+# reaches with a server or an agent's layout. The script itself is not run.
+function Get-ScriptFunctionText {
+    param(
+        [Parameter(Mandatory = $true)][string]$ScriptName,
+        [Parameter(Mandatory = $true)][string]$FunctionName
+    )
+    $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $script:RepoRoot $ScriptName), [ref]$null, [ref]$null)
+    $found = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $FunctionName }, $true)
+    if (-not $found) {
+        throw "No function $FunctionName in $ScriptName."
+    }
+    return $found.Extent.Text
+}
+
+# The text of an A1 exceptions file with one entry.
+function New-A1ExceptionText {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    param(
+        [Parameter(Mandatory = $true)][string]$Sha256,
+        [string]$Rule = 'Downloaded code run',
+        [string]$File = 'Attack.ps1',
+        [string]$Reason = 'known false positive in the test fixture',
+        [string]$Expires = (Get-Date).AddMonths(6).ToString('yyyy-MM-dd')
+    )
+    return (@{ exceptions = @(@{ rule = $Rule; file = $File; sha256 = $Sha256; reason = $Reason; expires = $Expires }) } | ConvertTo-Json -Depth 3)
+}
+
+# The SHA-256 Attack.ps1 has once a fixture wrote the given text (UTF-8, no BOM, no newline added).
+function Get-TextSha256 {
+    param([Parameter(Mandatory = $true)][string]$Text)
+    return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($Text)))
+}
+
+# A repository for A1's exceptions: main holds BaseExceptions (when given) at the default path, a
+# 'work' branch adds Attack.ps1 and BranchExceptions (when given), and origin/main is the base
+# commit. With -PullRequestMerge, the tested commit is a merge of 'work' into the base commit.
+function New-ExceptionRepository {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '')]
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Content,
+        [string]$BaseExceptions = '',
+        [string]$BranchExceptions = '',
+        [switch]$PullRequestMerge
+    )
+    $repo = New-GitRepository -Name $Name
+    $exceptionPath = Join-Path (Join-Path $repo '.security') 'a1-exceptions.json'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $exceptionPath) | Out-Null
+    Set-Content -LiteralPath (Join-Path $repo 'README.md') -Value '# base' -NoNewline
+    if ($BaseExceptions) {
+        Set-Content -LiteralPath $exceptionPath -Value $BaseExceptions -NoNewline
+    }
+    Add-GitCommit -Repository $repo -Message 'base'
+    $baseCommit = @(Invoke-Git -Repository $repo -Arguments @('rev-parse', 'HEAD'))[0]
+    Invoke-Git -Repository $repo -Arguments @('checkout', '-b', 'work') | Out-Null
+    Set-Content -LiteralPath (Join-Path $repo 'Attack.ps1') -Value $Content -NoNewline
+    if ($BranchExceptions) {
+        Set-Content -LiteralPath $exceptionPath -Value $BranchExceptions -NoNewline
+    }
+    Add-GitCommit -Repository $repo -Message 'attack'
+    Invoke-Git -Repository $repo -Arguments @('update-ref', 'refs/remotes/origin/main', $baseCommit) | Out-Null
+    if ($PullRequestMerge) {
+        Invoke-Git -Repository $repo -Arguments @('checkout', '-b', 'merge', $baseCommit) | Out-Null
+        Invoke-Git -Repository $repo -Arguments @('merge', '--no-ff', '-m', 'merge', 'work') | Out-Null
+    }
+    return $repo
+}
+
 # The entry names of a .nupkg (read only), for content assertions.
 function Get-NupkgEntry {
     param(
@@ -245,10 +369,8 @@ function Get-NupkgEntry {
     }
 }
 
-# True when the machine can reach the internet (the Grype host), false otherwise.
 # True when both hosts Grype needs answer: its GitHub release (the binary) and the
-# Anchore database host (the listing). A machine behind a flaky proxy reports offline
-# and the Network-tagged tests skip instead of failing on a transient error.
+# Anchore database host (the listing). Otherwise the Network-tagged tests skip.
 function Test-Online {
     $urls = @(
         'https://github.com/anchore/grype/releases',
@@ -289,6 +411,7 @@ function Invoke-PackResult {
         [Parameter(Mandatory = $true)][string]$RepositoryPath,
         [hashtable]$Arguments = @{},
         [string]$PublishFeed = 'https://pkgs.dev.azure.com/example/example/_packaging/tests/nuget/v3/index.json',
+        [hashtable]$Environment = @{},
         [switch]$UseWindowsPowerShell
     )
 
@@ -300,7 +423,7 @@ function Invoke-PackResult {
     }
 
     $result = Invoke-JobScript -CiTools $CiTools -ScriptName 'tec-pwsh-package-pack.ps1' `
-        -RepositoryPath $RepositoryPath -Arguments (@{ PublishFeed = $PublishFeed } + $Arguments) -UseWindowsPowerShell:$UseWindowsPowerShell
+        -RepositoryPath $RepositoryPath -Arguments (@{ PublishFeed = $PublishFeed } + $Arguments) -Environment $Environment -UseWindowsPowerShell:$UseWindowsPowerShell
     $nupkg = @(Get-ChildItem -LiteralPath $logDir -Filter '*.nupkg' -ErrorAction SilentlyContinue)
     [pscustomobject]@{
         ExitCode = $result.ExitCode
@@ -365,33 +488,6 @@ function Invoke-PublishResult {
         -Arguments @{ SbomPath = $SbomPath } -Environment $merged
 }
 
-# Runs an analysis job script (A1 or A2) against a repository.
-function Invoke-AnalysisResult {
-    param(
-        [Parameter(Mandatory = $true)][string]$CiTools,
-        [Parameter(Mandatory = $true)][string]$ScriptName,
-        [Parameter(Mandatory = $true)][string]$RepositoryPath,
-        [hashtable]$Arguments = @{},
-        [hashtable]$Environment = @{},
-        [switch]$UseWindowsPowerShell
-    )
-    return Invoke-JobScript -CiTools $CiTools -ScriptName $ScriptName -RepositoryPath $RepositoryPath `
-        -Arguments $Arguments -Environment $Environment -UseWindowsPowerShell:$UseWindowsPowerShell
-}
-
-# Runs A3 (biz-pwsh-analysis-pester.ps1) against a repository.
-function Invoke-PesterJobResult {
-    param(
-        [Parameter(Mandatory = $true)][string]$CiTools,
-        [Parameter(Mandatory = $true)][string]$RepositoryPath,
-        [hashtable]$Arguments = @{},
-        [hashtable]$Environment = @{},
-        [switch]$UseWindowsPowerShell
-    )
-    return Invoke-JobScript -CiTools $CiTools -ScriptName 'biz-pwsh-analysis-pester.ps1' -RepositoryPath $RepositoryPath `
-        -Arguments $Arguments -Environment $Environment -UseWindowsPowerShell:$UseWindowsPowerShell
-}
-
 # Runs B2 (sec-pwsh-analysis-cve.ps1) against a repository and an SBOM file.
 function Invoke-CveResult {
     param(
@@ -403,34 +499,4 @@ function Invoke-CveResult {
     )
     return Invoke-JobScript -CiTools $CiTools -ScriptName 'sec-pwsh-analysis-cve.ps1' `
         -RepositoryPath $RepositoryPath -Arguments (@{ SbomPath = $SbomPath } + $Arguments) -Environment $Environment
-}
-
-# Runs B2 again when the first failure looks like the transient Grype listing/download
-# error seen through flaky proxies ("unable to download listing: relative paths require a
-# module with a pwd"), which is grype's misleading name for a failed listing fetch.
-function Invoke-CveResultResilient {
-    param(
-        [Parameter(Mandatory = $true)][string]$CiTools,
-        [Parameter(Mandatory = $true)][string]$SbomPath,
-        [Parameter(Mandatory = $true)][string]$RepositoryPath,
-        [hashtable]$Arguments = @{},
-        [hashtable]$Environment = @{}
-    )
-
-    # The listing host behind a flaky proxy fails often and briefly; grype then reports
-    # "unable to download listing: relative paths require a module with a pwd", its
-    # misleading name for that fetch failing. Retry the run up to three times, with a
-    # growing pause, before letting the failure stand.
-    $delays = @(0, 15, 30)
-    $result = $null
-    foreach ($delay in $delays) {
-        if ($delay -gt 0) {
-            Start-Sleep -Seconds $delay
-        }
-        $result = Invoke-CveResult -CiTools $CiTools -SbomPath $SbomPath -RepositoryPath $RepositoryPath -Arguments $Arguments -Environment $Environment
-        if ($result.ExitCode -eq 0 -or $result.Output -notmatch 'unable to (download|update) vulnerability database|relative paths require a module with a pwd') {
-            return $result
-        }
-    }
-    return $result
 }

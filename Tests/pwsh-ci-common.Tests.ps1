@@ -32,6 +32,33 @@ Describe 'ConvertTo-CIConsoleText' {
     }
 }
 
+Describe 'Show-CIIssue' {
+    BeforeAll {
+        $script:SavedBuild = $env:TF_BUILD
+        $env:TF_BUILD = 'True'
+    }
+
+    AfterAll {
+        if ($null -eq $script:SavedBuild) { Remove-Item -LiteralPath 'Env:TF_BUILD' } else { $env:TF_BUILD = $script:SavedBuild }
+    }
+
+    It 'prints one command: no ##vso[ from <Field> stays live' -ForEach @(
+        @{ Field = 'the source path'; Parameters = @{ Message = 'm'; SourcePath = 'src/##vso[task.setvariable variable=PWNED]x.ps1' } }
+        @{ Field = 'the code'; Parameters = @{ Message = 'm'; Code = '##vso[task.complete]' } }
+        @{ Field = 'the message'; Parameters = @{ Message = '##vso[task.complete]' } }
+    ) {
+        $line = (Show-CIIssue -Type error @Parameters 6>&1) | Out-String
+        $line | Should -Match '^##vso\[task\.logissue type=error'
+        Get-ForeignLoggingCommand -Output $line | Should -BeNullOrEmpty
+        $line | Should -Match '##vso \['
+    }
+
+    It 'escapes a source path''s ] and ;' {
+        $line = (Show-CIIssue -Type warning -Message 'm' -SourcePath 'a]b;c.ps1' 6>&1) | Out-String
+        $line | Should -Match 'sourcepath=a%5Db%3Bc\.ps1'
+    }
+}
+
 Describe 'Write-CILog' {
     It 'resolves the log path under <ScriptDirectory>\Logs and creates the folder' {
         $script:fulllogpath | Should -Not -BeNullOrEmpty

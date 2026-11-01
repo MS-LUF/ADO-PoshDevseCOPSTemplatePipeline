@@ -3,10 +3,8 @@
 Tests for job C2, pub-pwsh-package-push.ps1: pushes the packed .nupkg to the feed.
 .DESCRIPTION
 The happy path pushes to a real https feed (Azure Artifacts); it is verified by the
-owner's runs (see Architecture.md, item 34). Everything up to the wire is covered here.
+owner's runs (backlog item 34). Everything up to the wire is covered here.
 #>
-
-. (Join-Path $PSScriptRoot 'Helpers.ps1')
 
 BeforeAll {
     . (Join-Path $PSScriptRoot 'Helpers.ps1')
@@ -81,10 +79,12 @@ Describe 'C2 push, fail-closed cases' {
     }
 
     It 'fails when the feed is unreachable' {
+        if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) { Set-ItResult -Skipped -Because 'the push needs the .NET SDK, which this machine does not have' }
         $folder = New-NupkgFolder -SourceNupkg $script:NupkgSource -Name 'c2-down'
         try {
             $r = Invoke-PushResult -CiTools $script:CiTools -PackageFolder $folder -PublishFeed 'https://127.0.0.1:1/nuget/v3/index.json'
             $r.ExitCode | Should -Be 1
+            $r.Output | Should -Match 'dotnet nuget push failed'
         } finally { Remove-Scratch -Path $folder }
     }
 }

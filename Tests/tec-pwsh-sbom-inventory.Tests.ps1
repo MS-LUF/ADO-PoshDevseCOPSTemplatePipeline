@@ -3,8 +3,6 @@
 Tests for job B1, tec-pwsh-sbom-inventory.ps1: the CycloneDX SBOM of the tested commit.
 #>
 
-. (Join-Path $PSScriptRoot 'Helpers.ps1')
-
 BeforeAll {
     . (Join-Path $PSScriptRoot 'Helpers.ps1')
     $script:CiTools = New-CiToolsCopy -Name 'b1-tools' -Scripts @('tec-pwsh-sbom-inventory.ps1')

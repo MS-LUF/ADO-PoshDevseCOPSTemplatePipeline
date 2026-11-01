@@ -103,7 +103,7 @@ function Show-CIIssue {
     }
     $escapeProperty = {
         param([string]$Value)
-        $Value.Replace(';', '%3B').Replace("`r", '%0D').Replace("`n", '%0A').Replace(']', '%5D')
+        (ConvertTo-CIConsoleText -Text $Value).Replace(';', '%3B').Replace("`r", '%0D').Replace("`n", '%0A').Replace(']', '%5D')
     }
     $properties = @("type=$Type")
     if ($SourcePath) { $properties += "sourcepath=$(& $escapeProperty $SourcePath)" }
