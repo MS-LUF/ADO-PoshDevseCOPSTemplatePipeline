@@ -1,5 +1,7 @@
-# TemplatePipeline
-Azure Pipelines extends template for the CI of PowerShell repositories: security analysis with the Initialize-ASTRuleGenerator rules, coding-practice analysis with PSScriptAnalyzer, the repository's Pester tests, its SBOM, and a check of its components for known vulnerabilities, and packs and publishes its PowerShell module as a NuGet package.
+# ADO-PoshDevSecOPSTemplatePipeline
+
+Azure Pipelines extends template for the CI of PowerShell repositories: security analysis with the [Initialize-ASTRule rules](https://github.com/MS-LUF/Initialize-ASTRuleGenerator), coding-practice analysis with PSScriptAnalyzer, the repository's Pester tests, its SBOM, and a check of its components for known vulnerabilities, and packs and publishes its PowerShell module as a NuGet package.
+
 
 (c) 2021-2026 lucas-cueff.com Distributed under Artistic Licence 2.0 (https://opensource.org/licenses/artistic-license-2.0).
 
